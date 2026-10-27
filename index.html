@@ -276,6 +276,9 @@ button.dcard:disabled{cursor:default;opacity:.75}
 .pairs{padding:12px 14px;display:grid;gap:8px}
 .pairgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:4px 16px}
 .pairrow{display:flex;justify-content:space-between;gap:8px;font-size:13.5px;padding:4px 0;border-bottom:1px solid var(--line)}
+.bymd th{line-height:1.5;text-transform:none;letter-spacing:0;font-size:11.5px}
+.bymd td.done{background:var(--win-soft)}
+.bymd tr.tot td{border-top:2px solid var(--muted);background:var(--surface-2)}
 .h2h td.diag{background:var(--surface-2);color:var(--muted);font-size:12px}
 .h2h td.lead{background:var(--win-soft)}
 .h2h td.trail{background:var(--loss-soft)}
@@ -946,6 +949,30 @@ function pairsSummary(st){
       <span class="num"><b>${p.total}</b> <span class="sub">· сыграно ${p.played}</span></span></div>`).join("")}</div>
   </div>`;
 }
+// Head-to-head meetings per matchday: rows = matchdays, columns = the 6 pairs + own-vs-own
+function pairsByMatchday(){
+  const pairs = []; for (let i=0;i<4;i++) for (let j=i+1;j<4;j++) pairs.push([i,j]);
+  const key = (a,b) => a<b ? a+"-"+b : b+"-"+a;
+  const grid = {}; // md -> key|"own" -> {total, played}
+  FIXTURES.forEach(f=>{ const oh = ownerOf(f.h), oa = ownerOf(f.a); if (oh===null || oa===null) return;
+    const k = oh===oa ? "own" : key(oh,oa);
+    const cell = ((grid[f.md] ||= {})[k] ||= {total:0, played:0});
+    cell.total++; if (isPlayed(f)) cell.played++; });
+  const head = pairs.map(([i,j])=>`<th><span class="own p${i}"></span>${esc(pname(i))}<br><span class="own p${j}"></span>${esc(pname(j))}</th>`).join("");
+  const cellHtml = c => !c || !c.total ? `<td class="sub">—</td>`
+    : `<td class="${c.played===c.total?"done":""}"><b class="num">${c.total}</b>${c.played?`<div class="sub num">сыграно ${c.played}</div>`:""}</td>`;
+  const sum = {}; let rowsHtml = "";
+  for (let md=1; md<=8; md++){
+    const g = grid[md] || {};
+    const cells = pairs.map(([i,j])=>{ const c = g[key(i,j)]; const k = key(i,j); (sum[k] ||= {total:0,played:0}); if (c){ sum[k].total+=c.total; sum[k].played+=c.played; } return cellHtml(c); }).join("");
+    const own = g.own; (sum.own ||= {total:0,played:0}); if (own){ sum.own.total+=own.total; sum.own.played+=own.played; }
+    const vs = pairs.reduce((a,[i,j])=>a+((g[key(i,j)]||{}).total||0),0);
+    rowsHtml += `<tr><td class="l"><button class="linkish" data-mdgo="${md}">Тур ${md}</button></td>${cells}${cellHtml(own)}<td class="num"><b>${vs}</b></td></tr>`;
+  }
+  const totalVs = pairs.reduce((a,[i,j])=>a+sum[key(i,j)].total,0);
+  const foot = `<tr class="tot"><td class="l"><b>Всего</b></td>${pairs.map(([i,j])=>cellHtml(sum[key(i,j)])).join("")}${cellHtml(sum.own)}<td class="num"><b>${totalVs}</b></td></tr>`;
+  return `<div class="panel scroll"><table class="lt bymd"><thead><tr><th class="l">Тур</th>${head}<th>сам с собой</th><th>очных в туре</th></tr></thead><tbody>${rowsHtml}${foot}</tbody></table></div>`;
+}
 function viewStats(){
   const st = participantStats();
   const assigned = CODES.some(c=>ownerOf(c)!==null);
@@ -988,6 +1015,8 @@ function viewStats(){
     <div style="display:grid;gap:8px"><h2>Личные встречи</h2>
       <p class="sub">Строка — участник, столбец — соперник: победы–ничьи–поражения в матчах, где команда одного играла против команды другого, и сколько очных матчей общего этапа уже сыграно из запланированных. Зелёным — кто ведёт в противостоянии.</p>
       ${pairsSummary(st)}${h2h}</div>
+    <div style="display:grid;gap:8px"><h2>Очные матчи по турам</h2>
+      <p class="sub">Сколько матчей между командами каждой пары участников стоит в каждом туре общего этапа. Нажмите на тур, чтобы открыть его матчи.</p>${pairsByMatchday()}</div>
     <div style="display:grid;gap:8px"><h2>Очки по турам</h2>
       <div class="panel" style="padding:12px 14px">${st.playedMds?pointsChart(st):'<p class="sub">График появится после первых сыгранных матчей.</p>'}
       <div class="legend" style="margin-top:6px">${[0,1,2,3].map(i=>`<span><i style="--z:var(--p${i})"></i>${esc(pname(i))}</span>`).join("")}</div></div></div>`;
@@ -1169,6 +1198,7 @@ document.addEventListener("click", e=>{
     window.scrollTo({top:0, behavior:"smooth"}); return; }
   if (t.id==="f-team-clear"){ S.team = null; saveFilters(); render(true); return; }
   if (t.id==="f-reset"){ S.filter = null; S.team = null; S.md = 0; S.status = "all"; saveFilters(); render(true); return; }
+  if (t.dataset.mdgo){ S.md = +t.dataset.mdgo; S.team = null; S.status = "all"; saveFilters(); location.hash = "#matches"; return; }
   if (t.dataset.pick){ pickTeam(t.dataset.pick); return; }
   if (t.dataset.cardopen){ const mid = t.dataset.cardopen; S.inl = S.inl.mid===mid ? {...S.inl, mid:null} : {...S.inl, mid, team:""}; render(true);
     if (S.inl.mid){ const i = document.getElementById("ic-player"); i && i.focus({preventScroll:true}); } return; }
