@@ -199,6 +199,11 @@ table.lt{width:100%;border-collapse:collapse;min-width:640px}
 .turn .ts{color:var(--muted);font-size:13px}
 .turn.done{border-color:var(--win)}
 .pin.now{box-shadow:0 0 0 2px var(--c)}
+.first{padding:12px 14px;display:grid;gap:8px}
+.qhead{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.qmove{display:inline-flex;gap:4px}
+.btn.xs{padding:2px 8px;font-size:12px;line-height:1.4}
+.btn:disabled{opacity:.4;cursor:default}
 .dboard{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 @media (max-width:820px){.dboard{grid-template-columns:minmax(0,1fr)}}
 .dpot h3{margin:0 0 8px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;gap:8px}
@@ -673,9 +678,11 @@ function viewDraft(){
   const D = draftInfo();
   const dis = S.canWrite ? "" : "disabled";
   const pickNo = {}; D.picks.forEach((c,i)=>pickNo[c]=i+1);
+  const canOrder = S.canWrite && D.n === 0;
   const names = D.order.map((p,k)=>`
     <div class="panel pin${!D.done && D.turn===p?" now":""}" style="--c:var(--p${p})">
-      <label for="pname-${p}">${k+1}-й в очереди</label>
+      <div class="qhead"><label for="pname-${p}">${k+1}-й в очереди</label>
+        ${canOrder?`<span class="qmove"><button class="btn xs" data-move="${p}" data-dir="-1" ${k===0?"disabled":""} aria-label="Поднять в очереди">←</button><button class="btn xs" data-move="${p}" data-dir="1" ${k===3?"disabled":""} aria-label="Опустить в очереди">→</button></span>`:""}</div>
       <input id="pname-${p}" maxlength="24" placeholder="${PLAYER_DEFAULT[p]}" value="${esc(S.cfg.names[p]||"")}" ${dis}>
       <span class="cnt num">${CODES.filter(c=>ownerOf(c)===p).length} из 9 команд</span>
     </div>`).join("");
@@ -705,12 +712,20 @@ function viewDraft(){
   else if (S.confirm === "random") actions = `<span>Раздать все 36 команд случайно по текущему порядку?</span><button class="btn danger" id="doRandom">Да, раздать</button><button class="btn" id="noConfirm">Отмена</button>`;
   else actions = `
     ${last?`<button class="btn" id="undoPick" ${dis}>Отменить последний выбор (${esc(CLUBS[last][0])})</button>`:""}
-    ${D.n===0?`<button class="btn" id="shuffleOrder" ${dis}>Перемешать порядок участников</button>`:""}
     ${D.n===0?`<button class="btn" id="askRandom" ${dis}>Раздать случайно</button>`:""}
     ${D.n?`<button class="btn" id="askReset" ${dis}>Начать заново</button>`:""}`;
+  const firstPick = D.n === 0 ? `<div class="panel first">
+      <b>Кто выбирает первым?</b>
+      <div class="chips" role="group" aria-label="Кто выбирает первым">
+        ${[0,1,2,3].map(p=>`<button class="chip" data-first="${p}" aria-pressed="${D.order[0]===p}" ${S.canWrite?"":"disabled"}><span class="own p${p}"></span>${esc(pname(p))}</button>`).join("")}
+        <button class="chip" id="shuffleOrder" ${S.canWrite?"":"disabled"}>Бросить жребий</button>
+      </div>
+      <p class="sub">Очередь: ${D.order.map(p=>esc(pname(p))).join(" → ")} → снова ${esc(pname(D.order[0]))}. Остальных можно переставить стрелками на карточках.</p>
+    </div>` : `<p class="sub">Очередь: ${D.order.map(p=>esc(pname(p))).join(" → ")}. После первого выбора порядок закреплён; чтобы изменить его, начните жеребьёвку заново.</p>`;
   return `<div style="display:grid;gap:6px"><h2>Жеребьёвка</h2>
       <p class="sub">Ходите по очереди: каждый берёт одну команду, потом ход переходит к следующему. Выбранная команда окрашивается в цвет участника и становится недоступна. У каждого будет 9 команд. Страница обновляется сама, ход друга появится через пару секунд.</p></div>
     ${banner}
+    ${firstPick}
     <div class="pgrid">${names}</div>
     <div class="actions">${actions}</div>
     <div class="dboard">${board}</div>
@@ -764,7 +779,10 @@ document.addEventListener("click", e=>{
   if (t.id==="noConfirm"){ S.confirm = null; render(true); return; }
   if (t.id==="doReset"){ S.confirm = null; S.cfg.owner = {}; S.cfg.picks = []; render(true); send({op:"draftReset"}); return; }
   if (t.id==="doRandom"){ S.confirm = null; randomDraft(); return; }
-  if (t.id==="shuffleOrder"){ const o = [0,1,2,3].sort(()=>Math.random()-.5); S.cfg.order = o; render(true); send({op:"order", order:o}); return; }
+  if (t.dataset.first){ const p = +t.dataset.first; setOrder([p, ...S.cfg.order.filter(x=>x!==p)]); return; }
+  if (t.dataset.move){ const p = +t.dataset.move, o = [...S.cfg.order], i = o.indexOf(p), j = i + (+t.dataset.dir);
+    if (j>=0 && j<4){ [o[i],o[j]] = [o[j],o[i]]; setOrder(o); } return; }
+  if (t.id==="shuffleOrder"){ const o = [0,1,2,3].sort(()=>Math.random()-.5); setOrder(o); toast(`Жребий: первым выбирает ${pname(o[0])}`); return; }
 });
 document.addEventListener("change", e=>{
   const el = e.target;
@@ -817,6 +835,11 @@ function saveName(i, v){
   const name = v.trim().slice(0,24);
   if (name === (S.cfg.names[i]||"")) return;
   S.cfg.names[i] = name; send({op:"name", i, name}); render();
+}
+function setOrder(o){
+  if (!S.canWrite || S.cfg.picks.length) return;
+  if (o.join() === S.cfg.order.join()) return;
+  S.cfg.order = o; render(true); send({op:"order", order:o});
 }
 function pickTeam(code){
   if (!S.canWrite) return;
