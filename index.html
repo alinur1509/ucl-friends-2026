@@ -286,6 +286,39 @@ button.dcard:disabled{cursor:default;opacity:.75}
 .chart .gl{stroke:var(--line);stroke-width:1}
 .chart .ax{fill:var(--muted);font-size:11px;font-family:var(--f-body)}
 @media (prefers-reduced-motion:no-preference){.md-bar .cells i{transition:background .3s}button.dcard{transition:box-shadow .12s}}
+
+/* phones (iPhone and similar) */
+@media (max-width:600px){
+  .mast .wrap{padding-block:14px 10px;gap:10px}
+  .mast h1 small{font-size:11px;margin-bottom:4px}
+  .tabs .wrap{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;overflow:visible;padding-left:max(4px,env(safe-area-inset-left,0px));padding-right:max(4px,env(safe-area-inset-right,0px))}
+  .tabs a{padding:9px 2px 8px;font-size:13.5px;text-align:center;overflow:hidden;text-overflow:ellipsis}
+  main .wrap{padding-block:14px 40px;gap:14px}
+  input,select,textarea{font-size:16px!important}
+  table.lt.league,table.lt.h2h,table.lt.bymd{min-width:0}
+  main .wrap>*,main .wrap>*>*{min-width:0}
+  .lt .xh{display:none}
+  .lt.league .club .nm{white-space:normal;overflow-wrap:break-word;line-height:1.2}
+  .m .club .sep{display:none}
+  .lt.league th,.lt.league td{padding:7px 4px}
+  .lt.league .pos{width:30px}
+  .lt.league .club .own{display:none}
+  .m{column-gap:6px;padding:10px 8px}
+  .m .club{gap:6px;align-items:center}
+  .m .club .own{display:none}
+  .m .club .nm{white-space:normal;overflow-wrap:break-word;line-height:1.15;font-size:14px}
+  .score{gap:3px}
+  .score input{width:38px;height:40px}
+  .h2h td{min-width:0;padding:6px 3px;font-size:12px}
+  .h2h th{padding:8px 3px;font-size:10px;letter-spacing:.02em}
+  .h2h td.l{font-size:12.5px}
+  .bymd th,.bymd td{padding:6px 1px;font-size:10.5px}
+  .bymd th .own{display:none}
+  .bymd td b{font-size:13px}
+  .rounds{grid-auto-flow:row;grid-auto-columns:auto;overflow:visible}
+  .ocard .row{flex-wrap:wrap;gap:4px 10px}
+  .pcard{padding:12px}
+}
 </style>
 </head>
 <body>
@@ -487,7 +520,7 @@ function clubCell(code, opts={}){
   const nm = opts.link ? `<button class="nm linkish" data-team="${code}" title="Все матчи ${esc(name)}">${esc(name)}</button>` : `<span class="nm">${esc(name)}</span>`;
   const o = ownerOf(code);
   const tag = o!==null ? `<span class="otag" style="--c:var(--p${o})">${esc(pname(o))}</span>` : "";
-  const sub = opts.cty===false ? (tag ? `<span class="cty">${tag}</span>` : "") : `<span class="cty"><span class="ctry">${cty}</span>${tag?` · ${tag}`:""}</span>`;
+  const sub = opts.cty===false ? (tag ? `<span class="cty">${tag}</span>` : "") : `<span class="cty"><span class="ctry">${cty}</span>${tag?`<span class="sep"> · </span>${tag}`:""}</span>`;
   return `<span class="club${opts.away?" away":""}">${badge(code, opts.sm)}<span style="min-width:0;display:grid">${nm}${sub}</span>${ownDot(code)}</span>`;
 }
 let toastT;
@@ -658,16 +691,16 @@ function viewTable(){
     return `<tr class="${dim?"dim":""} ${cut?"cut":""}">
       <td class="pos num" style="--z:${z}">${r.pos}</td>
       <td class="l">${clubCell(r.c,{link:true})}</td>
-      <td>${r.p}</td><td>${r.w}</td><td>${r.d}</td><td>${r.l}</td>
-      <td>${r.gf}:${r.ga}</td><td>${r.gd>0?"+":""}${r.gd}</td>
-      <td class="pts">${r.pts}</td><td><span class="form">${last5}</span></td></tr>`;
+      <td>${r.p}</td><td class="xh">${r.w}</td><td class="xh">${r.d}</td><td class="xh">${r.l}</td>
+      <td class="xh">${r.gf}:${r.ga}</td><td>${r.gd>0?"+":""}${r.gd}</td>
+      <td class="pts">${r.pts}</td><td class="xh"><span class="form">${last5}</span></td></tr>`;
   }).join("");
 
   return `${ownersHtml}${filterBar()}${S.team?teamCard(S.team):""}
     <div style="display:grid;gap:10px">
       <div><h2>Таблица общего этапа</h2><p class="sub">Сортировка: очки, разница мячей, забитые, забитые в гостях, победы, победы в гостях. Нажмите на клуб, чтобы увидеть все его матчи.</p></div>
-      <div class="panel scroll"><table class="lt">
-        <thead><tr><th>#</th><th class="l">Клуб</th><th title="Игры">И</th><th title="Победы">В</th><th title="Ничьи">Н</th><th title="Поражения">П</th><th>Мячи</th><th title="Разница">±</th><th>Очки</th><th>Форма</th></tr></thead>
+      <div class="panel scroll"><table class="lt league">
+        <thead><tr><th>#</th><th class="l">Клуб</th><th title="Игры">И</th><th class="xh" title="Победы">В</th><th class="xh" title="Ничьи">Н</th><th class="xh" title="Поражения">П</th><th class="xh">Мячи</th><th title="Разница">±</th><th>Очки</th><th class="xh">Форма</th></tr></thead>
         <tbody>${body}</tbody></table></div>
       <div class="legend">
         <span><i style="--z:var(--z1)"></i>1–8: сразу в 1/8 финала</span>
@@ -960,7 +993,7 @@ function pairsByMatchday(){
     cell.total++; if (isPlayed(f)) cell.played++; });
   const head = pairs.map(([i,j])=>`<th><span class="own p${i}"></span>${esc(pname(i))}<br><span class="own p${j}"></span>${esc(pname(j))}</th>`).join("");
   const cellHtml = c => !c || !c.total ? `<td class="sub">—</td>`
-    : `<td class="${c.played===c.total?"done":""}"><b class="num">${c.total}</b>${c.played?`<div class="sub num">сыграно ${c.played}</div>`:""}</td>`;
+    : `<td class="${c.played===c.total?"done":""}"><b class="num">${c.total}</b>${c.played?`<div class="sub num">сыгр. ${c.played}</div>`:""}</td>`;
   const sum = {}; let rowsHtml = "";
   for (let md=1; md<=8; md++){
     const g = grid[md] || {};
@@ -971,7 +1004,7 @@ function pairsByMatchday(){
   }
   const totalVs = pairs.reduce((a,[i,j])=>a+sum[key(i,j)].total,0);
   const foot = `<tr class="tot"><td class="l"><b>Всего</b></td>${pairs.map(([i,j])=>cellHtml(sum[key(i,j)])).join("")}${cellHtml(sum.own)}<td class="num"><b>${totalVs}</b></td></tr>`;
-  return `<div class="panel scroll"><table class="lt bymd"><thead><tr><th class="l">Тур</th>${head}<th>сам с собой</th><th>очных в туре</th></tr></thead><tbody>${rowsHtml}${foot}</tbody></table></div>`;
+  return `<div class="panel scroll"><table class="lt bymd"><thead><tr><th class="l">Тур</th>${head}<th>сам с&nbsp;собой</th><th>очных в&nbsp;туре</th></tr></thead><tbody>${rowsHtml}${foot}</tbody></table></div>`;
 }
 function viewStats(){
   const st = participantStats();
@@ -1003,7 +1036,7 @@ function viewStats(){
       const pl = st.plan[i][j];
       if (i===j) return `<td class="diag">сам с собой<div class="num">${pl.played} из ${pl.total}</div></td>`;
       const c = st.H[i][j];
-      const sched = `<div class="sub num">сыграно ${pl.played} из ${pl.total}</div>`;
+      const sched = `<div class="sub num">сыгр. ${pl.played} из ${pl.total}</div>`;
       if (!c.n) return `<td>${sched}</td>`;
       const lead = c.w>c.l ? "lead" : c.w<c.l ? "trail" : "";
       return `<td class="${lead}"><b class="num">${c.w}–${c.d}–${c.l}</b><div class="sub num">мячи ${c.gf}:${c.ga}</div>${sched}</td>`;
