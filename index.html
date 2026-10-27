@@ -642,7 +642,7 @@ function viewTable(){
   const place = {}; order.forEach((o,k)=>place[o.i]=k+1);
   const ownersHtml = assigned ? `<div class="owners">${os.map(o=>`
     <div class="panel ocard" style="--c:var(--p${o.i})">
-      <div class="name"><span>${esc(pname(o.i))}</span><span class="rank">${place[o.i]}-е место</span></div>
+      <div class="name"><span>${esc(pname(o.i))}</span></div>
       <div class="big num">${o.pts} <span style="font-size:12px;font-weight:600;font-family:var(--f-body);color:var(--muted)">очк.</span></div>
       <div class="row num"><span>Топ-8: <b>${o.top8}</b></span><span>Топ-24: <b>${o.top24}</b></span><span>РМ ${o.gd>0?"+":""}${o.gd}</span></div>
       <div class="row">${o.best?`Лучший: ${esc(CLUBS[o.best.c][0])} (${o.best.pos})`:`Клубов: ${o.n}`}</div>
@@ -983,7 +983,7 @@ function viewStats(){
     const last = p.form.slice(-5);
     const pct = p.n ? Math.round(p.w/p.n*100) : 0;
     return `<div class="panel pcard" style="--c:var(--p${p.i})">
-      <div class="phead"><span class="pplace num">${p.place}</span><div style="min-width:0"><div class="pname">${esc(pname(p.i))}</div>
+      <div class="phead"><div style="min-width:0"><div class="pname">${esc(pname(p.i))}</div>
         <div class="sub num">${p.n} матчей · побед ${pct}%</div></div><div class="ppts num">${p.pts}<small>очк.</small></div></div>
       <div class="pgrid4 num">
         <div><b>${p.w}</b><span>побед</span></div><div><b>${p.d}</b><span>ничьих</span></div><div><b>${p.l}</b><span>поражений</span></div>
