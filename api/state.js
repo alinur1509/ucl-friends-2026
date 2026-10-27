@@ -4,13 +4,16 @@
 import { get, put, BlobPreconditionFailedError } from "@vercel/blob";
 
 const PATH = "ucl-2026-27/state.json";
-const EMPTY = () => ({ rev: 0, results: {}, ko: {}, cfg: { names: ["", "", "", ""], owner: {}, picks: [], order: [0, 1, 2, 3] }, log: [] });
+const EMPTY = () => ({ rev: 0, results: {}, ko: {}, cards: {}, cfg: { names: ["", "", "", ""], owner: {}, picks: [], order: [0, 1, 2, 3] }, log: [] });
 const CODES = ["PSG","BAY","RMA","LIV","INT","MCI","ARS","BAR","ATM","DOR","ROM","SPO","AVL","POR","MUN","BRU","BET","PSV",
   "FEY","LIL","BOD","NAP","RBL","VIL","FEN","SHK","GAL","SLP","SLO","STU","AEK","LASK","COM","LEN","VIK","SAB"];
 const CODE_SET = new Set(CODES);
 const MATCH_ID = /^md[1-8]-[A-Z]{3,4}-[A-Z]{3,4}$/;
 const KO_IDS = new Set(["F", "SF1", "SF2", "QF1", "QF2", "QF3", "QF4",
   ...Array.from({ length: 8 }, (_, i) => `PO${i + 1}`), ...Array.from({ length: 8 }, (_, i) => `R${i + 1}`)]);
+
+const KO_MATCH = /^ko:(PO[1-8]|R[1-8]|QF[1-4]|SF[12]|F):[12]$/;
+const CARD_TYPES = new Set(["Y", "YR", "R"]);   // yellow, second yellow (sending-off), straight red
 
 class UserError extends Error { constructor(msg, status = 400) { super(msg); this.status = status; } }
 
@@ -25,6 +28,7 @@ function normalize(state) {
   s.cfg = { ...EMPTY().cfg, ...(state.cfg || {}) };
   if (!Array.isArray(s.cfg.picks)) s.cfg.picks = [];
   if (!isPerm(s.cfg.order)) s.cfg.order = [0, 1, 2, 3];
+  if (!s.cards || typeof s.cards !== "object" || Array.isArray(s.cards)) s.cards = {};
   return s;
 }
 
@@ -97,6 +101,9 @@ function apply(state, body) {
       return;
     }
     case "draftReset": {
+      const code = process.env.DRAFT_RESET_CODE;
+      if (!code) throw new UserError("Код сброса не настроен на сервере", 409);
+      if (String(body.code || "").trim() !== code) throw new UserError("Неверный код сброса", 403);
       cfg.owner = {}; cfg.picks = [];
       log({ k: "draftReset" });
       return;
@@ -108,12 +115,35 @@ function apply(state, body) {
       return;
     }
     case "draftRandom": {
+      if (cfg.picks.length) throw new UserError("Раздать случайно можно только до первого выбора", 409);
       const picks = body.picks;
       if (!Array.isArray(picks) || picks.length !== 36 || new Set(picks).size !== 36 || !picks.every(c => CODE_SET.has(c)))
         throw new UserError("Неверное распределение");
       cfg.picks = [...picks]; cfg.owner = {};
       picks.forEach((c, i) => { cfg.owner[c] = cfg.order[i % 4]; });
       log({ k: "draftRandom" });
+      return;
+    }
+    // ---- discipline: one document per card
+    case "card": {
+      const c = body.card || {};
+      if (!CODE_SET.has(c.team)) throw new UserError("Неизвестная команда");
+      if (!(MATCH_ID.test(c.match) || KO_MATCH.test(c.match))) throw new UserError("Неизвестный матч");
+      if (!CARD_TYPES.has(c.type)) throw new UserError("Неизвестный тип карточки");
+      const pl = String(c.pl || "").trim().replace(/\s+/g, " ").slice(0, 40);
+      if (!pl) throw new UserError("Впишите имя игрока");
+      const games = c.type === "R" ? Math.min(10, Math.max(1, Number.isInteger(c.games) ? c.games : 1)) : 1;
+      if (Object.keys(state.cards).length >= 2000) throw new UserError("Слишком много карточек", 409);
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      state.cards[id] = { team: c.team, pl, match: c.match, type: c.type, games, t };
+      log({ k: "card", team: c.team, pl, match: c.match, type: c.type });
+      return;
+    }
+    case "cardDel": {
+      const c = state.cards[body.id];
+      if (!c) throw new UserError("Карточка уже удалена", 409);
+      delete state.cards[body.id];
+      log({ k: "cardDel", team: c.team, pl: c.pl, type: c.type });
       return;
     }
     default: throw new UserError("Неизвестное действие");
