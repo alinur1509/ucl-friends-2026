@@ -172,6 +172,7 @@ table.lt{width:100%;border-collapse:collapse;min-width:640px}
 .pin input{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--surface-2);font-weight:600;width:100%}
 .pin .cnt{font-size:12px;color:var(--muted)}
 .actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.panel.admin{padding:12px 14px}
 .btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer}
 .btn.pri{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .btn.danger{background:var(--loss);border-color:var(--loss);color:#fff}
@@ -707,7 +708,7 @@ function viewTable(){
         <span><i style="--z:var(--z2)"></i>9–24: плей-офф раунд</span>
         <span><i style="--z:var(--z3)"></i>25–36: выбывают</span>
       </div>
-    </div>${viewLog()}`;
+    </div>${viewLog()}${adminPanel()}`;
 }
 
 const isPlayed = f => { const r = S.results[f.id]; return !!(r && isNum(r.h) && isNum(r.a)); };
@@ -816,10 +817,52 @@ function viewLog(){
     if (e.k==="draftRandom") return "Команды разданы случайно";
     if (e.k==="card") return `${{Y:"Жёлтая",YR:"Удаление (2 ЖК)",R:"Красная"}[e.type]||"Карточка"}: ${esc(e.pl)} (${nm(e.team)})`;
     if (e.k==="cardDel") return `Удалена карточка: ${esc(e.pl)} (${nm(e.team)})`;
+    if (e.k==="testFill") return "Заполнено тестовыми данными: все матчи, плей-офф и карточки";
+    if (e.k==="clearData") return "Все результаты и карточки очищены";
     return "";
   };
   return `<div style="display:grid;gap:10px"><h2>Последние изменения</h2>
     <div class="panel log">${items.map(e=>`<div><time>${fmt(e.t)}</time><span>${line(e)}</span></div>`).join("")}</div></div>`;
+}
+
+// Service panel: fill the whole tournament with random test data, or wipe every result. Both need the reset code.
+function adminPanel(){
+  const has = Object.keys(S.results).length || Object.keys(S.ko).length || Object.keys(S.cards).length;
+  const dis = S.canWrite ? "" : "disabled";
+  const code = `<input id="adminCode" class="codein" type="password" inputmode="numeric" autocomplete="off" maxlength="12" aria-label="Код">`;
+  let body;
+  if (S.confirm==="clear") body = `<span>Удалить все счета (общий этап и плей-офф) и все карточки? Жеребьёвка и имена останутся. Введите код:</span>${code}<button class="btn danger" id="doClear">Очистить</button><button class="btn" id="noConfirm">Отмена</button>`;
+  else if (S.confirm==="fill") body = `<span>Заполнить все 144 матча, плей-офф до финала и карточки случайными тестовыми данными? Введите код:</span>${code}<button class="btn danger" id="doFill">Заполнить</button><button class="btn" id="noConfirm">Отмена</button>`;
+  else body = has ? `<span class="sub">Удалит все счета и карточки, жеребьёвку не тронет. Нужен код.</span><button class="btn" id="askClear" ${dis}>Очистить все результаты</button>`
+    : `<span class="sub">Для проверки сайта: случайные счета, плей-офф и карточки. Потом можно очистить.</span><button class="btn" id="askFill" ${dis}>Заполнить тестовыми данными</button>`;
+  return `<div style="display:grid;gap:10px"><h2>Данные турнира</h2><div class="panel actions admin">${body}</div></div>`;
+}
+function buildTestData(){
+  const rnd = n => Math.floor(Math.random()*n);
+  const goals = () => [0,0,1,1,1,1,2,2,2,3,3,4][rnd(12)];
+  const keep = {results:S.results, ko:S.ko};
+  const results = {}; FIXTURES.forEach(f=>{ results[f.id] = {h:goals(), a:goals()}; });
+  const ko = {};
+  S.results = results; S.ko = ko;
+  try {
+    for (const [st,n] of [["PO",8],["R",8],["QF",4],["SF",2],["F",1]]){
+      const K = knockout(standings());
+      for (let i=1;i<=n;i++){
+        const id = st==="F" ? "F" : st+i, t = K.ties[id]; if (!t || !t.hi || !t.lo) continue;
+        const l1 = {hi:goals(), lo:goals()}, l2 = st==="F" ? {} : {hi:goals(), lo:goals()};
+        const ah = l1.hi + (l2.hi||0), al = l1.lo + (l2.lo||0);
+        ko[id] = {a:t.hi, b:t.lo, l1, l2, pen: ah===al ? (rnd(2)?"hi":"lo") : null};
+      }
+    }
+  } finally { S.results = keep.results; S.ko = keep.ko; }
+  const SUR = ["Иванов","Петров","Смирнов","Кузнецов","Попов","Волков","Морозов","Новиков","Соколов","Лебедев","Козлов","Орлов"];
+  const squad = c => [0,1,2].map(k=>SUR[(CODES.indexOf(c)*3+k) % SUR.length]);
+  const cards = [];
+  FIXTURES.forEach(f=>{ [f.h,f.a].forEach(team=>{
+    if (Math.random() < 0.55){ const x = Math.random();
+      cards.push({team, pl:squad(team)[rnd(3)], match:f.id, type: x<0.9?"Y":x<0.96?"YR":"R", games: x>=0.96 ? 1+rnd(2) : 1}); }
+  }); });
+  return {results, ko, cards};
 }
 
 function viewMatches(){
@@ -1252,6 +1295,14 @@ document.addEventListener("click", e=>{
     if (!c.trim()){ toast("Введите код сброса"); return; }
     S.confirm = null; render(true); send({op:"draftReset", code:c.trim()}).then(()=>{ if (!S.cfg.picks.length) toast("Жеребьёвка сброшена"); }); return; }
   if (t.id==="doRandom"){ S.confirm = null; randomDraft(); return; }
+  if (t.id==="askClear"){ S.confirm = "clear"; render(true); return; }
+  if (t.id==="askFill"){ S.confirm = "fill"; render(true); return; }
+  if (t.id==="doClear" || t.id==="doFill"){ const c = ((document.getElementById("adminCode")||{}).value || "").trim();
+    if (!c){ toast("Введите код"); return; }
+    const fill = t.id==="doFill";
+    S.confirm = null; render(true);
+    const body = fill ? {op:"testFill", code:c, ...buildTestData()} : {op:"clearData", code:c};
+    send(body).then(()=>{ const n = Object.keys(S.results).length; if (fill ? n : !n) toast(fill ? "Тестовые данные заполнены" : "Все результаты очищены"); }); return; }
   if (t.dataset.first){ const p = +t.dataset.first; setOrder([p, ...S.cfg.order.filter(x=>x!==p)]); return; }
   if (t.dataset.move){ const p = +t.dataset.move, o = [...S.cfg.order], i = o.indexOf(p), j = i + (+t.dataset.dir);
     if (j>=0 && j<4){ [o[i],o[j]] = [o[j],o[i]]; setOrder(o); } return; }
@@ -1270,6 +1321,7 @@ document.addEventListener("change", e=>{
 });
 document.addEventListener("keydown", e=>{
   if (e.key==="Enter" && e.target.id==="c-player"){ e.preventDefault(); addCard(); return; }
+  if (e.key==="Enter" && e.target.id==="adminCode"){ e.preventDefault(); (document.getElementById("doClear")||document.getElementById("doFill")).click(); return; }
   if (e.key==="Enter" && e.target.id==="resetCode"){ e.preventDefault(); document.getElementById("doReset").click(); return; }
   if (e.key==="Enter" && e.target.id==="ic-player"){ e.preventDefault(); addInlineCard(S.inl.mid); return; }
   if (e.key==="Enter" && e.target.tagName==="INPUT") e.target.blur(); });

@@ -187,6 +187,43 @@ function apply(state, body) {
       state.log = (state.log || []).filter(e => !((e.k === "match" || e.k === "match-del") && ids.has(e.id)));
       return;
     }
+    // ---- test data: fill everything at once / wipe all results (both need the reset code)
+    case "testFill": {
+      const code = process.env.DRAFT_RESET_CODE;
+      if (!code || String(body.code || "").trim() !== code) throw new UserError("Неверный код", 403);
+      if (Object.keys(state.results).length || Object.keys(state.ko).length || Object.keys(state.cards).length)
+        throw new UserError("Сначала очистите текущие результаты", 409);
+      const results = {}, ko = {}, cards = {};
+      for (const [id, r] of Object.entries(body.results || {})) {
+        if (!MATCH_ID.test(id)) throw new UserError("Неизвестный матч");
+        const h = goal(r && r.h), a = goal(r && r.a); if (h === null || a === null) throw new UserError("Неверный счёт");
+        results[id] = { h, a };
+      }
+      const leg = l => ({ hi: goal(l && l.hi), lo: goal(l && l.lo) });
+      for (const [id, d] of Object.entries(body.ko || {})) {
+        if (!KO_IDS.has(id) || !d || !CODE_SET.has(d.a) || !CODE_SET.has(d.b)) throw new UserError("Неверная пара плей-офф");
+        ko[id] = { a: d.a, b: d.b, l1: leg(d.l1), l2: leg(d.l2), pen: d.pen === "hi" || d.pen === "lo" ? d.pen : null };
+      }
+      const list = Array.isArray(body.cards) ? body.cards.slice(0, 400) : [];
+      list.forEach((c, i) => {
+        if (!c || !CODE_SET.has(c.team) || !(MATCH_ID.test(c.match) || KO_MATCH.test(c.match)) || !CARD_TYPES.has(c.type)) throw new UserError("Неверная карточка");
+        const pl = String(c.pl || "").trim().replace(/\s+/g, " ").slice(0, 40); if (!pl) throw new UserError("Неверная карточка");
+        const games = c.type === "R" ? Math.min(10, Math.max(1, Number.isInteger(c.games) ? c.games : 1)) : 1;
+        cards[Date.now().toString(36) + i.toString(36) + Math.random().toString(36).slice(2, 6)] = { team: c.team, pl, match: c.match, type: c.type, games, t };
+      });
+      state.results = results; state.ko = ko; state.cards = cards;
+      log({ k: "testFill", n: Object.keys(results).length });
+      return;
+    }
+    case "clearData": {
+      const code = process.env.DRAFT_RESET_CODE;
+      if (!code || String(body.code || "").trim() !== code) throw new UserError("Неверный код", 403);
+      const gone = new Set(["match", "match-del", "ko", "card", "cardDel", "testFill", "clearData"]);
+      state.results = {}; state.ko = {}; state.cards = {};
+      state.log = (state.log || []).filter(e => !gone.has(e.k));
+      log({ k: "clearData" });
+      return;
+    }
     // ---- discipline: one document per card
     case "card": {
       const c = body.card || {};
