@@ -701,7 +701,7 @@ function matchRow(f, opts={}){
   const mine = S.filter!==null && (ownerOf(f.h)===S.filter || ownerOf(f.a)===S.filter);
   const derby = ownerOf(f.h)!==null && ownerOf(f.a)!==null && ownerOf(f.h)!==ownerOf(f.a);
   const dis = S.canWrite ? "" : "disabled";
-  const when = (opts.showDate ? `Тур ${f.md} · ${dayLabel(f.date)} · ` : "") + `${f.time} CET · у вас ${localTime(f)}`;
+  const when = opts.showDate ? `Тур ${f.md} · ${dayLabel(f.date)}` : "";
   return `<div class="m ${done?"done":""} ${mine?"hl":""}" data-id="${f.id}">
     ${clubCell(f.h, {link:true})}
     <div class="score">
@@ -710,7 +710,7 @@ function matchRow(f, opts={}){
       <input id="s-${f.id}-a" type="number" inputmode="numeric" min="0" max="99" aria-label="Голы ${esc(CLUBS[f.a][0])}" value="${isNum(r.a)?r.a:""}" ${dis}>
     </div>
     ${clubCell(f.a,{away:true, link:true})}
-    <div class="when">${when}${derby?` · <b>${esc(pname(ownerOf(f.h)))} против ${esc(pname(ownerOf(f.a)))}</b>`:""} · ${cardToggle(f.id)}</div>
+    <div class="when">${[when, derby?`<b>${esc(pname(ownerOf(f.h)))} против ${esc(pname(ownerOf(f.a)))}</b>`:"", cardToggle(f.id)].filter(Boolean).join(" · ")}</div>
     ${suspLine(f.id)}${S.inl.mid===f.id?cardPanel(f.id):""}
   </div>`;
 }
@@ -799,7 +799,7 @@ function viewMatches(){
       ${g.items.map(f=>matchRow(f)).join("")}`).join("")}</div>`
     : `<div class="note">Под эти фильтры матчей нет. Попробуйте «Все туры» или сбросьте фильтры.</div>`;
   return `<div style="display:grid;gap:6px"><h2>Матчи</h2>
-      <p class="sub">Вносите любой матч в любом порядке — ждать тура не нужно. Счёт сохраняется сам, когда заполнены обе клетки; сотрите обе цифры, чтобы отменить. Хозяева слева. Время — по официальному календарю UEFA.</p></div>
+      <p class="sub">Вносите любой матч в любом порядке — ждать тура не нужно. Счёт сохраняется сам, когда заполнены обе клетки; сотрите обе цифры, чтобы отменить. Хозяева слева, даты — по официальному календарю UEFA.</p></div>
     ${filterBar({md:true, status:true})}
     <p class="sub num">Показано матчей: <b>${list.length}</b>, из них сыграно ${played}.</p>
     ${body}`;
