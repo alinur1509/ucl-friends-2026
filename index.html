@@ -452,15 +452,25 @@ const S = {
   inl:{mid:null, team:"", type:"Y", games:1},   // inline card entry under a match
   cfg:{names:["","","",""], owner:{}, picks:[], order:[0,1,2,3]},
   canWrite:false, dbReady:false, log:[], rev:-1,
-  md:0, filter:null, team:null, status:"all", confirm:null,
+  md:0, filter:null, filter2:null, team:null, status:"all", confirm:null,
 };
 try { const saved = JSON.parse(localStorage.getItem("ucl-filters") || "{}");
   if ([0,1,2,3].includes(saved.filter)) S.filter = saved.filter;
+  if ([0,1,2,3].includes(saved.filter2) && saved.filter2 !== S.filter && S.filter !== null) S.filter2 = saved.filter2;
   if (typeof saved.team === "string" && CLUBS[saved.team]) S.team = saved.team;
   if (saved.md >= 0 && saved.md <= 8) S.md = saved.md;
   if (["all","open","done"].includes(saved.status)) S.status = saved.status;
 } catch(e){}
-function saveFilters(){ try { localStorage.setItem("ucl-filters", JSON.stringify({filter:S.filter, team:S.team, md:S.md, status:S.status})); } catch(e){} }
+// Participant filter: none, one (all matches of that person) or two (only their head-to-head matches).
+const selP = () => [S.filter, S.filter2].filter(x=>x!==null);
+const inSel = o => { const p = selP(); return !p.length || p.includes(o); };
+function pairSel(oh, oa){
+  const p = selP();
+  if (!p.length) return true;
+  if (p.length===1) return oh===p[0] || oa===p[0];
+  return (oh===p[0] && oa===p[1]) || (oh===p[1] && oa===p[0]);
+}
+function saveFilters(){ try { localStorage.setItem("ucl-filters", JSON.stringify({filter:S.filter, filter2:S.filter2, team:S.team, md:S.md, status:S.status})); } catch(e){} }
 // Shared state lives behind /api/state (Vercel Function + Vercel Blob).
 let inflight = 0, queue = Promise.resolve();
 // Only accept a state that is at least as new as what we already show (rev is bumped on every save),
@@ -687,7 +697,7 @@ function viewTable(){
     const z = r.pos<=8?"var(--z1)":r.pos<=24?"var(--z2)":"var(--z3)";
     const last5 = r.form.slice(-5).map(([md,res])=>`<i class="${res}" title="Тур ${md}">${{W:"В",D:"Н",L:"П"}[res]}</i>`).join("")
       || `<i class="n"></i>`;
-    const dim = (S.filter!==null && ownerOf(r.c)!==S.filter) || (S.team && r.c!==S.team);
+    const dim = !inSel(ownerOf(r.c)) || (S.team && r.c!==S.team);
     const cut = r.pos===8||r.pos===24;
     return `<tr class="${dim?"dim":""} ${cut?"cut":""}">
       <td class="pos num" style="--z:${z}">${r.pos}</td>
@@ -717,7 +727,7 @@ function filterBar(opts={}){
     const o = ownerOf(c); return `<option value="${c}" ${S.team===c?"selected":""}>${esc(CLUBS[c][0])}${o!==null?" · "+esc(pname(o)):""}</option>`;}).join("")}</optgroup>`).join("");
   const people = `<div class="chips" role="group" aria-label="Участник">
     <button class="chip" data-filter="" aria-pressed="${S.filter===null}">Все участники</button>
-    ${[0,1,2,3].map(i=>`<button class="chip" data-filter="${i}" aria-pressed="${S.filter===i}"><span class="own p${i}"></span>${esc(pname(i))}</button>`).join("")}
+    ${[0,1,2,3].map(i=>`<button class="chip" data-filter="${i}" aria-pressed="${selP().includes(i)}"><span class="own p${i}"></span>${esc(pname(i))}</button>`).join("")}
   </div>`;
   const team = `<label class="sel"><span>Команда</span><select id="f-team"><option value="">Все команды</option>${teamOpts}</select></label>`;
   const md = opts.md ? `<div class="chips" role="group" aria-label="Тур">
@@ -731,6 +741,7 @@ function filterBar(opts={}){
   const active = S.filter!==null || S.team || (opts.md && S.md) || (opts.status && S.status!=="all");
   return `<div class="panel fbar">
     <div class="frow">${people}</div>
+    ${opts.md?`<div class="sub" style="font-size:12px">${selP().length===2?`Только очные матчи ${esc(pname(S.filter))} и ${esc(pname(S.filter2))}. Нажмите на участника ещё раз, чтобы убрать его.`:"Можно выбрать двоих — останутся только их очные матчи."}</div>`:""}
     <div class="frow">${team}${active?`<button class="btn sm" id="f-reset">Сбросить фильтры</button>`:""}</div>
     ${md?`<div class="frow">${md}</div>`:""}${st?`<div class="frow">${st}</div>`:""}
   </div>`;
@@ -738,7 +749,7 @@ function filterBar(opts={}){
 function matchRow(f, opts={}){
   const r = S.results[f.id] || {};
   const done = isNum(r.h) && isNum(r.a);
-  const mine = S.filter!==null && (ownerOf(f.h)===S.filter || ownerOf(f.a)===S.filter);
+  const mine = selP().length>0 && pairSel(ownerOf(f.h), ownerOf(f.a));
   const derby = ownerOf(f.h)!==null && ownerOf(f.a)!==null && ownerOf(f.h)!==ownerOf(f.a);
   const dis = S.canWrite ? "" : "disabled";
   const when = opts.showDate ? `Тур ${f.md} · ${dayLabel(f.date)}` : "";
@@ -869,7 +880,7 @@ function viewMatches(){
   let list = FIXTURES.filter(f=>
     (!S.md || f.md===S.md) &&
     (!S.team || f.h===S.team || f.a===S.team) &&
-    (S.filter===null || ownerOf(f.h)===S.filter || ownerOf(f.a)===S.filter) &&
+    pairSel(ownerOf(f.h), ownerOf(f.a)) &&
     (S.status==="all" || (S.status==="done") === isPlayed(f)));
   list = [...list].sort((x,y)=> x.md-y.md || x.date.localeCompare(y.date) || x.time.localeCompare(y.time));
   const groups = [];
@@ -883,7 +894,7 @@ function viewMatches(){
   return `<div style="display:grid;gap:6px"><h2>Матчи</h2>
       <p class="sub">Вносите любой матч в любом порядке — ждать тура не нужно. Счёт сохраняется сам, когда заполнены обе клетки; сотрите обе цифры, чтобы отменить. Хозяева слева, даты — по официальному календарю UEFA.</p></div>
     ${filterBar({md:true, status:true})}
-    <p class="sub num">Показано матчей: <b>${list.length}</b>, из них сыграно ${played}.</p>
+    <p class="sub num">${selP().length===2?`Очные матчи <b>${esc(pname(S.filter))}</b> и <b>${esc(pname(S.filter2))}</b>: `:"Показано матчей: "}<b>${list.length}</b>, из них сыграно ${played}.</p>
     ${body}`;
 }
 
@@ -922,7 +933,7 @@ function viewPlayoff(){
     const pens = (t.needPen || t.pen) && !(t.aggHi!==t.aggLo && t.aggHi!==undefined) ? `<div class="pens">По пенальти прошёл:
       <button data-pen="${t.id}" data-side="hi" aria-pressed="${t.pen==="hi"}" ${dis}>${esc(CLUBS[t.hi][0])}</button>
       <button data-pen="${t.id}" data-side="lo" aria-pressed="${t.pen==="lo"}" ${dis}>${esc(CLUBS[t.lo][0])}</button></div>` : "";
-    const focus = (S.filter!==null && (ownerOf(t.hi)===S.filter || ownerOf(t.lo)===S.filter)) || (S.team && (t.hi===S.team || t.lo===S.team));
+    const focus = (selP().length>0 && pairSel(ownerOf(t.hi), ownerOf(t.lo))) || (S.team && (t.hi===S.team || t.lo===S.team));
     return `<div class="panel tie${single?" single":""}${focus?" focus":""}" data-tie="${t.id}" data-hi="${t.hi}" data-lo="${t.lo}">
       ${t.stale?`<div class="note warn" style="padding:6px 8px;font-size:12px">Пара изменилась после правки таблицы — старый счёт скрыт.</div>`:""}
       <div class="hd"><span>${single?"":"Дома 2-й матч у №"+K.rank[t.hi]}</span>${single?"<span>Счёт</span>":"<span>1-й</span><span>2-й</span>"}<span>Σ</span></div>
@@ -1132,7 +1143,7 @@ function viewCards(){
       <button class="btn pri" id="c-add" ${dis}>Добавить карточку</button>
     </div>
   </div>`;
-  const fTeam = c => (S.filter===null || ownerOf(c)===S.filter) && (!S.team || S.team===c);
+  const fTeam = c => inSel(ownerOf(c)) && (!S.team || S.team===c);
   const upcoming = [];
   D.players.forEach(p=>p.bans.forEach(b=>{
     const next = b.miss.find(x=>!x.played);
@@ -1268,12 +1279,19 @@ document.addEventListener("click", e=>{
   const t = e.target.closest("button"); if (!t) return;
   if ("md" in t.dataset){ S.md = +t.dataset.md; saveFilters(); render(true); return; }
   if (t.dataset.status){ S.status = t.dataset.status; saveFilters(); render(true); return; }
-  if ("filter" in t.dataset){ S.filter = t.dataset.filter===""?null:+t.dataset.filter; saveFilters(); render(true); return; }
+  if ("filter" in t.dataset){
+    const v = t.dataset.filter==="" ? null : +t.dataset.filter;
+    if (v===null){ S.filter = null; S.filter2 = null; }
+    else if (S.filter===v){ S.filter = S.filter2; S.filter2 = null; }      // unselect first
+    else if (S.filter2===v){ S.filter2 = null; }                            // unselect second
+    else if (S.filter===null){ S.filter = v; }
+    else S.filter2 = v;                                                     // second pick (a third replaces it)
+    saveFilters(); render(true); return; }
   if (t.dataset.team){ S.team = t.dataset.team; saveFilters();
     if (currentView()==="stats" || currentView()==="draft") location.hash = "#table"; else render(true);
     window.scrollTo({top:0, behavior:"smooth"}); return; }
   if (t.id==="f-team-clear"){ S.team = null; saveFilters(); render(true); return; }
-  if (t.id==="f-reset"){ S.filter = null; S.team = null; S.md = 0; S.status = "all"; saveFilters(); render(true); return; }
+  if (t.id==="f-reset"){ S.filter = null; S.filter2 = null; S.team = null; S.md = 0; S.status = "all"; saveFilters(); render(true); return; }
   if (t.dataset.mdgo){ S.md = +t.dataset.mdgo; S.team = null; S.status = "all"; saveFilters(); location.hash = "#matches"; return; }
   if (t.dataset.pick){ pickTeam(t.dataset.pick); return; }
   if (t.dataset.cardopen){ const mid = t.dataset.cardopen; S.inl = S.inl.mid===mid ? {...S.inl, mid:null} : {...S.inl, mid, team:""}; render(true);
