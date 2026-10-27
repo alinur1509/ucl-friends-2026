@@ -24,14 +24,21 @@ BAR-COM SHK-RMA FEY-RBL LASK-POR LIV-LEN MCI-SPO PSG-GAL PSV-STU SLP-AVL NAP-VIK
 const OPP = {};
 CODES.forEach(c => { OPP[c] = new Set(); });
 PAIRS.split(/\s+/).forEach(x => { const [h, a] = x.split("-"); OPP[h].add(a); OPP[a].add(h); });
-// Clubs this player may not take now: opponents of clubs they already own. If every free club is
-// blocked, the restriction is lifted for that pick (any free club allowed).
+// Draft rules for the player on turn:
+// 1) opponents of clubs they already own are blocked;
+// 2) pots go in order: pick from the first pot that has a non-blocked free club;
+// 3) if no pot has one, any free club from the lowest pot that still has free clubs.
+const POT_OF = c => Math.floor(CODES.indexOf(c) / 9);
 function draftOptions(owner, p) {
   const free = CODES.filter(c => ![0, 1, 2, 3].includes(owner[c]));
   const blocked = new Set();
   CODES.forEach(c => { if (owner[c] === p) OPP[c].forEach(o => blocked.add(o)); });
-  const allowed = free.filter(c => !blocked.has(c));
-  return { free, blocked, allowed, fallback: allowed.length === 0 };
+  const open = free.filter(c => !blocked.has(c));
+  const fallback = open.length === 0;
+  const base = fallback ? free : open;
+  const pot = base.length ? Math.min(...base.map(POT_OF)) : -1;
+  const allowed = base.filter(c => POT_OF(c) === pot);
+  return { free, blocked, allowed, pot, fallback };
 }
 const MATCH_ID = /^md[1-8]-[A-Z]{3,4}-[A-Z]{3,4}$/;
 const KO_IDS = new Set(["F", "SF1", "SF2", "QF1", "QF2", "QF3", "QF4",
@@ -123,9 +130,12 @@ function apply(state, body) {
       const p = cfg.order[n % 4];
       if (countOf(p) >= 9) throw new UserError("У этого участника уже 9 команд", 409);
       const opt = draftOptions(cfg.owner, p);
-      if (!opt.fallback && opt.blocked.has(body.code)) {
-        const mine = CODES.filter(c => cfg.owner[c] === p && OPP[c].has(body.code));
-        throw new UserError(`Нельзя: эта команда играет с вашей (${mine.join(", ")}). Выберите другую`, 409);
+      if (!opt.allowed.includes(body.code)) {
+        if (!opt.fallback && opt.blocked.has(body.code)) {
+          const mine = CODES.filter(c => cfg.owner[c] === p && OPP[c].has(body.code));
+          throw new UserError(`Нельзя: эта команда играет с вашей (${mine.join(", ")}). Выберите другую`, 409);
+        }
+        throw new UserError(`Сейчас выбор из корзины ${opt.pot + 1}`, 409);
       }
       cfg.picks.push(body.code); cfg.owner[body.code] = p;
       log({ k: "pick", code: body.code, p, n: n + 1 });
@@ -160,7 +170,7 @@ function apply(state, body) {
       const owner = {};
       picks.forEach((c, i) => {
         const p = cfg.order[i % 4], opt = draftOptions(owner, p);
-        if (!opt.fallback && opt.blocked.has(c)) throw new UserError("Случайная раздача нарушает правило соперников — попробуйте ещё раз");
+        if (!opt.allowed.includes(c)) throw new UserError("Случайная раздача нарушает правила жеребьёвки — попробуйте ещё раз");
         owner[c] = p;
       });
       cfg.picks = [...picks]; cfg.owner = owner;
