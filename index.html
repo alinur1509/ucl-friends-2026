@@ -335,7 +335,7 @@ const S = {
   results:{},            // matchId -> {h,a}
   ko:{},                 // tieId -> {a,b,l1:{hi,lo},l2:{hi,lo},pen}
   cfg:{names:["","","",""], owner:{}, picks:[], order:[0,1,2,3]},
-  canWrite:false, dbReady:false, log:[],
+  canWrite:false, dbReady:false, log:[], rev:-1,
   md:0, filter:null, team:null, status:"all", confirm:null,
 };
 try { const saved = JSON.parse(localStorage.getItem("ucl-filters") || "{}");
@@ -347,13 +347,19 @@ try { const saved = JSON.parse(localStorage.getItem("ucl-filters") || "{}");
 function saveFilters(){ try { localStorage.setItem("ucl-filters", JSON.stringify({filter:S.filter, team:S.team, md:S.md, status:S.status})); } catch(e){} }
 // Shared state lives behind /api/state (Vercel Function + Vercel Blob).
 let inflight = 0, queue = Promise.resolve();
+// Only accept a state that is at least as new as what we already show (rev is bumped on every save),
+// so a slow or cached response can never roll the page back.
 function applyState(st){
-  if (!st || typeof st !== "object") return;
+  if (!st || typeof st !== "object") return false;
+  const rev = Number.isInteger(st.rev) ? st.rev : 0;
+  if (rev < S.rev) return false;
+  S.rev = rev;
   S.results = st.results || {}; S.ko = st.ko || {};
   const c = st.cfg || {};
   S.cfg = {names: Array.isArray(c.names) ? [...c.names] : ["","","",""], owner: c.owner ? {...c.owner} : {},
     picks: Array.isArray(c.picks) ? [...c.picks] : [], order: Array.isArray(c.order) && c.order.length===4 ? [...c.order] : [0,1,2,3]};
   S.log = Array.isArray(st.log) ? st.log : [];
+  return true;
 }
 function send(body){
   inflight++;
@@ -362,7 +368,7 @@ function send(body){
       const res = await fetch("/api/state", {method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(body)});
       const data = await res.json().catch(()=>({}));
       if (!res.ok){ if (data.state) applyState(data.state); const err = new Error(data.error || ("ошибка " + res.status)); err.soft = res.status < 500; throw err; }
-      if (inflight === 1){ applyState(data); }
+      if (inflight === 1) applyState(data);   // with more saves queued, the last answer brings everything
       S.dbReady = true; setStatus();
     } catch (e){
       toast(e.soft ? e.message : "Не сохранилось: " + e.message);

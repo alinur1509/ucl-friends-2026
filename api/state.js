@@ -4,7 +4,7 @@
 import { get, put, BlobPreconditionFailedError } from "@vercel/blob";
 
 const PATH = "ucl-2026-27/state.json";
-const EMPTY = () => ({ results: {}, ko: {}, cfg: { names: ["", "", "", ""], owner: {}, picks: [], order: [0, 1, 2, 3] }, log: [] });
+const EMPTY = () => ({ rev: 0, results: {}, ko: {}, cfg: { names: ["", "", "", ""], owner: {}, picks: [], order: [0, 1, 2, 3] }, log: [] });
 const CODES = ["PSG","BAY","RMA","LIV","INT","MCI","ARS","BAR","ATM","DOR","ROM","SPO","AVL","POR","MUN","BRU","BET","PSV",
   "FEY","LIL","BOD","NAP","RBL","VIL","FEN","SHK","GAL","SLP","SLO","STU","AEK","LASK","COM","LEN","VIK","SAB"];
 const CODE_SET = new Set(CODES);
@@ -33,7 +33,9 @@ let cache = null; // {state, etag, at}
 const CACHE_MS = 4000;
 
 async function readState() {
-  const r = await get(PATH, { access: "private" });
+  // useCache:false — an overwritten blob can be served stale from Blob's cache for up to 60 s;
+  // a stale read here made fresh draft picks "disappear" for a few seconds.
+  const r = await get(PATH, { access: "private", useCache: false });
   if (!r || r.statusCode !== 200 || !r.stream) return { state: EMPTY(), etag: null };
   const state = await new Response(r.stream).json();
   return { state: normalize(state), etag: r.blob.etag };
@@ -115,7 +117,9 @@ export async function GET() {
   try {
     if (!cache || Date.now() - cache.at > CACHE_MS) {
       const { state, etag } = await readState();
-      cache = { state, etag, at: Date.now() };
+      // never let this instance's cache go backwards
+      if (!cache || (state.rev || 0) >= (cache.state.rev || 0)) cache = { state, etag, at: Date.now() };
+      else cache.at = Date.now();
     }
     return json(cache.state);
   } catch (e) {
@@ -132,6 +136,7 @@ export async function POST(request) {
       const cur = await readState();
       state = cur.state;
       apply(state, body);
+      state.rev = (Number.isInteger(state.rev) ? state.rev : 0) + 1;   // monotonically increasing version
       const res = await put(PATH, JSON.stringify(state), {
         access: "private", contentType: "application/json", addRandomSuffix: false,
         allowOverwrite: cur.etag !== null, ...(cur.etag ? { ifMatch: cur.etag } : {}),
