@@ -177,6 +177,16 @@ function apply(state, body) {
       log({ k: "draftRandom" });
       return;
     }
+    // ---- admin cleanup (needs the reset code): remove match results and their history lines without a trace
+    case "purgeResults": {
+      const code = process.env.DRAFT_RESET_CODE;
+      if (!code || String(body.code || "").trim() !== code) throw new UserError("Неверный код", 403);
+      const ids = new Set((Array.isArray(body.ids) ? body.ids : []).filter(id => MATCH_ID.test(id)));
+      if (!ids.size) throw new UserError("Не указаны матчи");
+      ids.forEach(id => { delete state.results[id]; });
+      state.log = (state.log || []).filter(e => !((e.k === "match" || e.k === "match-del") && ids.has(e.id)));
+      return;
+    }
     // ---- discipline: one document per card
     case "card": {
       const c = body.card || {};
