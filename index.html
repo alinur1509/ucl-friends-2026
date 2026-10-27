@@ -273,6 +273,9 @@ button.dcard:disabled{cursor:default;opacity:.75}
 .pteams{display:flex;flex-wrap:wrap;gap:4px}
 .tchip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:2px 8px 2px 2px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;color:var(--ink)}
 .h2h td{vertical-align:middle;min-width:110px}
+.pairs{padding:12px 14px;display:grid;gap:8px}
+.pairgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:4px 16px}
+.pairrow{display:flex;justify-content:space-between;gap:8px;font-size:13.5px;padding:4px 0;border-bottom:1px solid var(--line)}
 .h2h td.diag{background:var(--surface-2);color:var(--muted);font-size:12px}
 .h2h td.lead{background:var(--win-soft)}
 .h2h td.trail{background:var(--loss-soft)}
@@ -900,6 +903,14 @@ function participantStats(){
     }
   }
   curve.forEach(c=>{ for (let k=1;k<=8;k++) c[k]+=c[k-1]; });
+  // scheduled league-phase meetings between participants, and played ones
+  const plan = [0,1,2,3].map(()=>[0,1,2,3].map(()=>({total:0, played:0})));
+  FIXTURES.forEach(f=>{ const oh = ownerOf(f.h), oa = ownerOf(f.a); if (oh===null || oa===null) return;
+    const done = isPlayed(f);
+    plan[oh][oa].total++; if (done) plan[oh][oa].played++;
+    if (oh!==oa){ plan[oa][oh].total++; if (done) plan[oa][oh].played++; } });
+  P.forEach(p=>{ p.vsTotal = [0,1,2,3].filter(j=>j!==p.i).reduce((a,j)=>a+plan[p.i][j].total,0);
+                 p.ownTotal = plan[p.i][p.i].total; p.ownPlayed = plan[p.i][p.i].played; });
   CODES.forEach(c=>{ const o = ownerOf(c); if (o!==null) P[o].teams.push(pos[c]); });
   D.players.forEach(pl=>{ const o = ownerOf(pl.team); if (o===null) return;
     pl.cards.forEach(c=>{ if (c.type==="Y") P[o].y++; else P[o].r++; }); });
@@ -907,7 +918,7 @@ function participantStats(){
   const rank = [...P].sort((a,b)=>b.pts-a.pts || b.gd-a.gd || b.gf-a.gf);
   rank.forEach((p,k)=>p.place = k+1);
   const playedMds = Math.max(0, ...FIXTURES.filter(isPlayed).map(f=>f.md));
-  return {P, H, curve, rank, playedMds, total: matches.length};
+  return {P, H, plan, curve, rank, playedMds, total: matches.length};
 }
 function pointsChart(st){
   const W = 640, Hh = 220, L = 36, R = 16, T = 14, B = 30;
@@ -923,6 +934,17 @@ function pointsChart(st){
     return `<polyline points="${pts}" fill="none" stroke="var(--p${o})" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
       <circle cx="${x(maxMd)}" cy="${y(last)}" r="4" fill="var(--p${o})"/>`; }).join("");
   return `<svg viewBox="0 0 ${W} ${Hh}" class="chart" role="img" aria-label="Очки участников по турам">${grid}${xs}${lines}</svg>`;
+}
+function pairsSummary(st){
+  const pairs = [];
+  for (let i=0;i<4;i++) for (let j=i+1;j<4;j++) pairs.push({i, j, ...st.plan[i][j]});
+  pairs.sort((a,b)=>b.total-a.total);
+  const vs = pairs.reduce((a,p)=>a+p.total,0), own = [0,1,2,3].reduce((a,i)=>a+st.plan[i][i].total,0);
+  return `<div class="panel pairs">
+    <div class="sub num">По жеребьёвке в общем этапе: <b>${vs}</b> очных матчей между вами и <b>${own}</b> матчей «сам с собой» из 144.</div>
+    <div class="pairgrid">${pairs.map(p=>`<div class="pairrow"><span><span class="own p${p.i}"></span> ${esc(pname(p.i))} — <span class="own p${p.j}"></span> ${esc(pname(p.j))}</span>
+      <span class="num"><b>${p.total}</b> <span class="sub">· сыграно ${p.played}</span></span></div>`).join("")}</div>
+  </div>`;
 }
 function viewStats(){
   const st = participantStats();
@@ -943,24 +965,29 @@ function viewStats(){
       <div class="prow"><span class="lbl">Форма</span><span class="form">${last.length?last.map(f=>`<span title="${esc(CLUBS[f.team][0])} ${f.gf}:${f.ga} ${esc(CLUBS[f.opp][0])} · ${esc(f.label)}">${dot(f.res)}</span>`).join(""):'<i class="n"></i>'}</span></div>
       <div class="prow"><span class="lbl">Крупнейшая победа</span><span>${p.big?`${esc(CLUBS[p.big.team][0])} ${p.big.gf}:${p.big.ga} ${esc(CLUBS[p.big.opp][0])}`:"—"}</span></div>
       <div class="prow"><span class="lbl">Карточки</span><span class="num"><i class="cc y"></i>${p.y} &nbsp;<i class="cc r"></i>${p.r}</span></div>
-      <div class="prow"><span class="lbl">Матчей «сам с собой»</span><span class="num">${p.own}</span></div>
+      <div class="prow"><span class="lbl">Очных матчей с друзьями</span><span class="num">${p.vsTotal}</span></div>
+      <div class="prow"><span class="lbl">Матчей «сам с собой»</span><span class="num">сыграно ${p.ownPlayed} из ${p.ownTotal}</span></div>
       <div class="pteams">${p.teams.map(t=>`<button class="tchip" data-team="${t.c}" title="${esc(CLUBS[t.c][0])}: ${t.pos}-е место, ${t.pts} очк.">${badge(t.c,true)}<span class="num">${t.pos}</span></button>`).join("")}</div>
       <div class="sub">Лучшая: ${p.teams[0]?`${esc(CLUBS[p.teams[0].c][0])} (${p.teams[0].pos})`:"—"} · худшая: ${p.teams.length?`${esc(CLUBS[p.teams[p.teams.length-1].c][0])} (${p.teams[p.teams.length-1].pos})`:"—"} · в топ-8: ${p.teams.filter(t=>t.pos<=8).length} · в топ-24: ${p.teams.filter(t=>t.pos<=24).length}</div>
     </div>`;
   }).join("");
   const h2h = `<div class="panel scroll"><table class="lt h2h"><thead><tr><th class="l">против →</th>${[0,1,2,3].map(j=>`<th><span class="own p${j}"></span> ${esc(pname(j))}</th>`).join("")}</tr></thead><tbody>
     ${[0,1,2,3].map(i=>`<tr><td class="l"><span class="own p${i}"></span> <b>${esc(pname(i))}</b></td>${[0,1,2,3].map(j=>{
-      if (i===j) return `<td class="diag">внутренних: ${st.P[i].own}</td>`;
-      const c = st.H[i][j]; if (!c.n) return `<td class="sub">—</td>`;
+      const pl = st.plan[i][j];
+      if (i===j) return `<td class="diag">сам с собой<div class="num">${pl.played} из ${pl.total}</div></td>`;
+      const c = st.H[i][j];
+      const sched = `<div class="sub num">сыграно ${pl.played} из ${pl.total}</div>`;
+      if (!c.n) return `<td>${sched}</td>`;
       const lead = c.w>c.l ? "lead" : c.w<c.l ? "trail" : "";
-      return `<td class="${lead}"><b class="num">${c.w}–${c.d}–${c.l}</b><div class="sub num">мячи ${c.gf}:${c.ga}</div></td>`;
+      return `<td class="${lead}"><b class="num">${c.w}–${c.d}–${c.l}</b><div class="sub num">мячи ${c.gf}:${c.ga}</div>${sched}</td>`;
     }).join("")}</tr>`).join("")}
     </tbody></table></div>`;
   return `<div style="display:grid;gap:6px"><h2>Участники</h2>
       <p class="sub">Очки — сумма очков ваших команд в общем этапе. Победы, ничьи, поражения и мячи считаются по всем сыгранным матчам турнира, включая плей-офф. Сыграно матчей: ${st.total}.</p></div>
     <div class="pcards">${cards}</div>
     <div style="display:grid;gap:8px"><h2>Личные встречи</h2>
-      <p class="sub">Строка — участник, столбец — соперник: победы–ничьи–поражения в матчах, где команда одного играла против команды другого. Зелёным — кто ведёт в противостоянии.</p>${h2h}</div>
+      <p class="sub">Строка — участник, столбец — соперник: победы–ничьи–поражения в матчах, где команда одного играла против команды другого, и сколько очных матчей общего этапа уже сыграно из запланированных. Зелёным — кто ведёт в противостоянии.</p>
+      ${pairsSummary(st)}${h2h}</div>
     <div style="display:grid;gap:8px"><h2>Очки по турам</h2>
       <div class="panel" style="padding:12px 14px">${st.playedMds?pointsChart(st):'<p class="sub">График появится после первых сыгранных матчей.</p>'}
       <div class="legend" style="margin-top:6px">${[0,1,2,3].map(i=>`<span><i style="--z:var(--p${i})"></i>${esc(pname(i))}</span>`).join("")}</div></div></div>`;
