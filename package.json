@@ -1,0 +1,8 @@
+{
+  "name": "ucl-friends-2026",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vercel/blob": "latest"
+  }
+}
