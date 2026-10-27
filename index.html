@@ -220,6 +220,9 @@ button.dcard:disabled{cursor:default;opacity:.75}
 .dcard.taken{background:color-mix(in srgb, var(--c) 22%, var(--surface));border-color:var(--c)}
 .dcard.taken .bdg,.dcard.taken .dn{opacity:.55}
 .dcard.taken .who{color:var(--ink);font-weight:600}
+.dcard.blocked{background:var(--surface-2);border-style:dashed;opacity:.55}
+.dcard.blocked .who{color:var(--loss);white-space:normal;line-height:1.25}
+.warnc{color:var(--loss)}
 .dcard .stamp{position:absolute;top:7px;right:-26px;transform:rotate(35deg);background:var(--loss);color:#fff;font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:2px 28px}
 .roster{padding:12px 14px;border-top:4px solid var(--c);display:grid;gap:8px}
 .roster ol{margin:0;padding-left:20px;display:grid;gap:4px;font-size:13px}
@@ -353,6 +356,18 @@ function localTime(f){
 }
 
 const PLAYER_DEFAULT = ["Игрок 1","Игрок 2","Игрок 3","Игрок 4"];
+// opponents in the league phase, per club
+const OPP = {}; CODES.forEach(c=>OPP[c]=new Set());
+FIXTURES.forEach(f=>{ OPP[f.h].add(f.a); OPP[f.a].add(f.h); });
+// Draft rule: a player can't take an opponent of a club they already own; if every free club is blocked,
+// the rule is lifted for that pick.
+function draftOptions(owner, p){
+  const free = CODES.filter(c=>![0,1,2,3].includes(owner[c]));
+  const why = {};
+  CODES.forEach(c=>{ if (owner[c]===p) OPP[c].forEach(o=>{ (why[o] ||= []).push(c); }); });
+  const allowed = free.filter(c=>!why[c]);
+  return {free, why, allowed, fallback: allowed.length===0};
+}
 
 // ---------------------------------------------------------------- state
 const S = {
@@ -868,7 +883,9 @@ function viewCards(){
 
 function draftInfo(){
   const picks = S.cfg.picks || [], n = picks.length, order = S.cfg.order;
-  return {picks, n, order, done: n >= 36, turn: n < 36 ? order[n % 4] : null,
+  const turn = n < 36 ? order[n % 4] : null;
+  const opt = turn===null ? {free:[], why:{}, allowed:[], fallback:false} : draftOptions(S.cfg.owner, turn);
+  return {picks, n, order, done: n >= 36, turn, opt,
     next: n + 1 < 36 ? order[(n + 1) % 4] : null, round: Math.floor(n / 4) + 1};
 }
 function viewDraft(){
@@ -887,7 +904,10 @@ function viewDraft(){
     ? `<div class="turn done"><div><div class="tl">Жеребьёвка завершена</div><div class="ts">Все 36 команд разобраны. Можно вносить счета во вкладке «Матчи».</div></div></div>`
     : `<div class="turn" style="--c:var(--p${D.turn})"><span class="own p${D.turn}" style="width:16px;height:16px"></span>
         <div><div class="tl">Выбирает: ${esc(pname(D.turn))}</div>
-        <div class="ts num">Выбор ${D.n+1} из 36 · круг ${D.round} из 9${D.next!==null?` · следующий — ${esc(pname(D.next))}`:""}</div></div></div>`;
+        <div class="ts num">Выбор ${D.n+1} из 36 · круг ${D.round} из 9${D.next!==null?` · следующий — ${esc(pname(D.next))}`:""}</div>
+        <div class="ts">${D.opt.fallback
+          ? `<b class="warnc">Все свободные команды — соперники команд ${esc(pname(D.turn))}, поэтому сейчас можно взять любую.</b>`
+          : `Доступно: <b class="num">${D.opt.allowed.length}</b> из ${D.opt.free.length} свободных · соперников своих команд брать нельзя`}</div></div></div>`;
   const board = POTS.map((list,p)=>`
     <div class="dpot"><h3>Корзина ${p+1} <span class="num">${list.filter(c=>ownerOf(c)===null).length} свободно</span></h3>
       <div class="dgrid">${list.map(c=>{
@@ -895,6 +915,9 @@ function viewDraft(){
         if (o!==null) return `<div class="dcard taken" style="--c:var(--p${o})" aria-label="${esc(CLUBS[c][0])} — занята, ${esc(pname(o))}">
             ${badge(c)}<span class="dn">${esc(CLUBS[c][0])}</span>
             <span class="who"><span class="own p${o}"></span>${esc(pname(o))} · №${pickNo[c]||"—"}</span><span class="stamp">Занята</span></div>`;
+        const why = !D.done && !D.opt.fallback ? D.opt.why[c] : null;
+        if (why) return `<div class="dcard blocked" title="Нельзя: играет с ${esc(why.map(x=>CLUBS[x][0]).join(", "))}">
+            ${badge(c)}<span class="dn">${esc(CLUBS[c][0])}</span><span class="who">соперник: ${esc(why.map(x=>CLUBS[x][0]).join(", "))}</span></div>`;
         return `<button class="dcard" data-pick="${c}" ${dis||D.done?"disabled":""} title="Выбрать для ${D.done?"":esc(pname(D.turn))}">
             ${badge(c)}<span class="dn">${esc(CLUBS[c][0])}</span><span class="who">${CLUBS[c][1]}</span></button>`;
       }).join("")}</div></div>`).join("");
@@ -906,7 +929,7 @@ function viewDraft(){
   const last = D.n ? D.picks[D.n-1] : null;
   let actions;
   if (S.confirm === "reset") actions = `<span>Сброс удалит все выборы. Введите код сброса:</span><input id="resetCode" class="codein" type="password" inputmode="numeric" autocomplete="off" maxlength="12" aria-label="Код сброса"><button class="btn danger" id="doReset">Сбросить жеребьёвку</button><button class="btn" id="noConfirm">Отмена</button>`;
-  else if (S.confirm === "random") actions = `<span>Раздать все 36 команд случайно по текущему порядку?</span><button class="btn danger" id="doRandom">Да, раздать</button><button class="btn" id="noConfirm">Отмена</button>`;
+  else if (S.confirm === "random") actions = `<span>Раздать все 36 команд случайно по текущему порядку (с правилом соперников)?</span><button class="btn danger" id="doRandom">Да, раздать</button><button class="btn" id="noConfirm">Отмена</button>`;
   else actions = `
     ${last?`<button class="btn" id="undoPick" ${dis}>Отменить последний выбор (${esc(CLUBS[last][0])})</button>`:""}
     ${D.n===0?`<button class="btn" id="askRandom" ${dis}>Раздать случайно</button>`:""}
@@ -920,7 +943,7 @@ function viewDraft(){
       <p class="sub">Очередь: ${D.order.map(p=>esc(pname(p))).join(" → ")} → снова ${esc(pname(D.order[0]))}. Остальных можно переставить стрелками на карточках.</p>
     </div>` : `<p class="sub">Очередь: ${D.order.map(p=>esc(pname(p))).join(" → ")}. После первого выбора порядок закреплён; чтобы изменить его, начните жеребьёвку заново.</p>`;
   return `<div style="display:grid;gap:6px"><h2>Жеребьёвка</h2>
-      <p class="sub">Ходите по очереди: каждый берёт одну команду, потом ход переходит к следующему. Выбранная команда окрашивается в цвет участника и становится недоступна. У каждого будет 9 команд. Страница обновляется сама, ход друга появится через пару секунд.</p></div>
+      <p class="sub">Ходите по очереди: каждый берёт одну команду, потом ход переходит к следующему. Выбранная команда окрашивается в цвет участника и становится недоступна. Брать соперников своих команд по общему этапу нельзя — такие карточки серые. Если в свой ход выбрать не из чего, можно взять любую свободную. У каждого будет 9 команд. Страница обновляется сама, ход друга появится через пару секунд.</p></div>
     ${banner}
     ${firstPick}
     <div class="pgrid">${names}</div>
@@ -1089,15 +1112,19 @@ function pickTeam(code){
   if (!S.canWrite) return;
   const D = draftInfo();
   if (D.done || ownerOf(code)!==null) return;
+  if (!D.opt.fallback && D.opt.why[code]){ toast(`Нельзя: играет с ${D.opt.why[code].map(x=>CLUBS[x][0]).join(", ")}`); return; }
   S.cfg.owner = {...S.cfg.owner, [code]: D.turn}; S.cfg.picks = [...D.picks, code];
   render(true);
   toast(`${pname(D.turn)} берёт ${CLUBS[code][0]}`);
   send({op:"pick", code, n:D.n});
 }
 function randomDraft(){
-  // balanced: shuffle within each pot, then deal pots in turn so everyone gets 2–3 clubs per pot
-  const picks = []; POTS.forEach(list=>[...list].sort(()=>Math.random()-.5).forEach(c=>picks.push(c)));
-  S.cfg.picks = picks; S.cfg.owner = {}; picks.forEach((c,i)=>S.cfg.owner[c] = S.cfg.order[i%4]);
+  // simulate the draft turn by turn with the opponent rule; random choice among allowed clubs
+  const owner = {}, picks = [];
+  for (let i=0;i<36;i++){ const p = S.cfg.order[i%4], o = draftOptions(owner, p);
+    const pool = o.fallback ? o.free : o.allowed, c = pool[Math.floor(Math.random()*pool.length)];
+    owner[c] = p; picks.push(c); }
+  S.cfg.picks = picks; S.cfg.owner = owner;
   render(true); send({op:"draftRandom", picks}); toast("Команды разданы");
 }
 

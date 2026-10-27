@@ -8,6 +8,31 @@ const EMPTY = () => ({ rev: 0, results: {}, ko: {}, cards: {}, cfg: { names: [""
 const CODES = ["PSG","BAY","RMA","LIV","INT","MCI","ARS","BAR","ATM","DOR","ROM","SPO","AVL","POR","MUN","BRU","BET","PSV",
   "FEY","LIL","BOD","NAP","RBL","VIL","FEN","SHK","GAL","SLP","SLO","STU","AEK","LASK","COM","LEN","VIK","SAB"];
 const CODE_SET = new Set(CODES);
+// League-phase pairings (official draw) — used by the draft rule "you can't take an opponent of your own club".
+const PAIRS = `AEK-LASK BRU-AVL DOR-VIL POR-MCI LIL-BET RMA-INT BAR-FEY STU-VIK LIV-ATM PSG-SLO SPO-GAL NAP-ARS
+FEN-ROM PSV-SHK COM-RBL BAY-BOD MUN-SAB SLP-LEN LEN-SPO SAB-SLP ARS-LIL ATM-MUN INT-BRU GAL-BAR
+RBL-PSV VIK-BAY VIL-NAP FEY-COM LASK-LIV ROM-RMA AVL-FEN SHK-AEK BOD-DOR MCI-PSG BET-POR SLO-STU
+FEN-SLP SAB-DOR ROM-SLO POR-PSV LIV-VIL MCI-AEK PSG-BAR NAP-BOD STU-ATM COM-MUN LIL-GAL AVL-VIK
+BRU-LEN BAY-ARS INT-SHK RMA-RBL BET-FEY SPO-LASK SHK-SPO GAL-STU ATM-BAY BAR-AVL FEY-INT BOD-LIL
+LASK-SLO MUN-ROM VIL-PSG AEK-RMA FEN-LIV DOR-BET POR-NAP PSV-BRU RBL-MCI LEN-COM SLP-ARS VIK-SAB
+BOD-LASK GAL-AVL ARS-DOR COM-AEK FEY-POR MCI-NAP RBL-LEN RMA-PSV SLO-BET SAB-BAR SLP-VIL ATM-VIK
+BRU-LIV INT-STU SHK-FEN LIL-BAY PSG-ROM SPO-MUN VIK-FEY VIL-SAB AEK-GAL ROM-SPO AVL-PSG BAR-MCI
+BAY-SLP MUN-RBL NAP-BRU BET-COM SLO-SHK ARS-RMA DOR-INT LASK-FEN LIV-POR PSV-ATM LEN-BOD STU-LIL
+BOD-ATM GAL-FEY AEK-ROM AVL-DOR INT-LIV POR-SLP LIL-SLO RMA-LASK STU-BRU FEN-VIL SAB-NAP COM-PSG
+MUN-BAY RBL-SHK LEN-MCI BET-ARS SPO-BAR VIK-PSV ARS-SAB ROM-LIL ATM-FEN DOR-AEK BRU-BOD BAY-BET
+BAR-COM SHK-RMA FEY-RBL LASK-POR LIV-LEN MCI-SPO PSG-GAL PSV-STU SLP-AVL NAP-VIK VIL-MUN SLO-INT`;
+const OPP = {};
+CODES.forEach(c => { OPP[c] = new Set(); });
+PAIRS.split(/\s+/).forEach(x => { const [h, a] = x.split("-"); OPP[h].add(a); OPP[a].add(h); });
+// Clubs this player may not take now: opponents of clubs they already own. If every free club is
+// blocked, the restriction is lifted for that pick (any free club allowed).
+function draftOptions(owner, p) {
+  const free = CODES.filter(c => ![0, 1, 2, 3].includes(owner[c]));
+  const blocked = new Set();
+  CODES.forEach(c => { if (owner[c] === p) OPP[c].forEach(o => blocked.add(o)); });
+  const allowed = free.filter(c => !blocked.has(c));
+  return { free, blocked, allowed, fallback: allowed.length === 0 };
+}
 const MATCH_ID = /^md[1-8]-[A-Z]{3,4}-[A-Z]{3,4}$/;
 const KO_IDS = new Set(["F", "SF1", "SF2", "QF1", "QF2", "QF3", "QF4",
   ...Array.from({ length: 8 }, (_, i) => `PO${i + 1}`), ...Array.from({ length: 8 }, (_, i) => `R${i + 1}`)]);
@@ -97,6 +122,11 @@ function apply(state, body) {
       if ([0, 1, 2, 3].includes(cfg.owner[body.code])) throw new UserError("Эту команду уже забрали", 409);
       const p = cfg.order[n % 4];
       if (countOf(p) >= 9) throw new UserError("У этого участника уже 9 команд", 409);
+      const opt = draftOptions(cfg.owner, p);
+      if (!opt.fallback && opt.blocked.has(body.code)) {
+        const mine = CODES.filter(c => cfg.owner[c] === p && OPP[c].has(body.code));
+        throw new UserError(`Нельзя: эта команда играет с вашей (${mine.join(", ")}). Выберите другую`, 409);
+      }
       cfg.picks.push(body.code); cfg.owner[body.code] = p;
       log({ k: "pick", code: body.code, p, n: n + 1 });
       return;
@@ -127,8 +157,13 @@ function apply(state, body) {
       const picks = body.picks;
       if (!Array.isArray(picks) || picks.length !== 36 || new Set(picks).size !== 36 || !picks.every(c => CODE_SET.has(c)))
         throw new UserError("Неверное распределение");
-      cfg.picks = [...picks]; cfg.owner = {};
-      picks.forEach((c, i) => { cfg.owner[c] = cfg.order[i % 4]; });
+      const owner = {};
+      picks.forEach((c, i) => {
+        const p = cfg.order[i % 4], opt = draftOptions(owner, p);
+        if (!opt.fallback && opt.blocked.has(c)) throw new UserError("Случайная раздача нарушает правило соперников — попробуйте ещё раз");
+        owner[c] = p;
+      });
+      cfg.picks = [...picks]; cfg.owner = owner;
       log({ k: "draftRandom" });
       return;
     }
