@@ -31,14 +31,21 @@ function normalize(state) {
 // Short in-memory cache: many friends polling at once cost one storage read per few seconds.
 let cache = null; // {state, etag, at}
 const CACHE_MS = 4000;
+// Newest version this instance knows for sure (it wrote it itself), with the etag returned by put().
+// Blob storage can keep answering with the previous version for a moment after an overwrite;
+// when that happens we continue from this copy instead of the stale read.
+let latest = null; // {state, etag}
+const revOf = s => (s && Number.isInteger(s.rev) ? s.rev : 0);
 
 async function readState() {
   // useCache:false — an overwritten blob can be served stale from Blob's cache for up to 60 s;
   // a stale read here made fresh draft picks "disappear" for a few seconds.
   const r = await get(PATH, { access: "private", useCache: false });
   if (!r || r.statusCode !== 200 || !r.stream) return { state: EMPTY(), etag: null };
-  const state = await new Response(r.stream).json();
-  return { state: normalize(state), etag: r.blob.etag };
+  const state = normalize(await new Response(r.stream).json());
+  const read = { state, etag: r.blob.etag };
+  if (latest && latest.etag && revOf(latest.state) > revOf(state)) return { state: structuredClone(latest.state), etag: latest.etag };
+  return read;
 }
 
 function apply(state, body) {
@@ -118,7 +125,7 @@ export async function GET() {
     if (!cache || Date.now() - cache.at > CACHE_MS) {
       const { state, etag } = await readState();
       // never let this instance's cache go backwards
-      if (!cache || (state.rev || 0) >= (cache.state.rev || 0)) cache = { state, etag, at: Date.now() };
+      if (!cache || revOf(state) >= revOf(cache.state)) cache = { state, etag, at: Date.now() };
       else cache.at = Date.now();
     }
     return json(cache.state);
@@ -130,7 +137,9 @@ export async function GET() {
 export async function POST(request) {
   let body;
   try { body = await request.json(); } catch { return json({ error: "Неверный запрос" }, 400); }
-  for (let attempt = 0; attempt < 6; attempt++) {
+  let lastErr = "";
+  const waits = [150, 300, 600, 1000, 1500, 2000, 2500, 3000];   // ~11 s in total
+  for (let attempt = 0; attempt <= waits.length; attempt++) {
     let state;
     try {
       const cur = await readState();
@@ -141,14 +150,19 @@ export async function POST(request) {
         access: "private", contentType: "application/json", addRandomSuffix: false,
         allowOverwrite: cur.etag !== null, ...(cur.etag ? { ifMatch: cur.etag } : {}),
       });
-      cache = { state, etag: (res && res.etag) || null, at: Date.now() };
+      const etag = (res && res.etag) || null;
+      latest = { state: structuredClone(state), etag };
+      cache = { state, etag, at: Date.now() };
       return json(state);
     } catch (e) {
       if (e instanceof UserError) return json({ error: e.message, state }, e.status);
       const conflict = e instanceof BlobPreconditionFailedError || /already exists|precondition/i.test(String(e && e.message));
-      if (conflict) { await new Promise(r => setTimeout(r, 60 + Math.random() * 200)); continue; }
+      lastErr = `${e && e.name}: ${e && e.message}`;
+      if (conflict && attempt < waits.length) { latest = null; await new Promise(r => setTimeout(r, waits[attempt] + Math.random() * 150)); continue; }
+      if (conflict) break;
       return json({ error: "Не удалось сохранить: " + e.message }, 500);
     }
   }
-  return json({ error: "Слишком много одновременных правок, попробуйте ещё раз" }, 409);
+  console.error("save gave up after retries:", body && body.op, lastErr);
+  return json({ error: "Сервер не смог сохранить — попробуйте ещё раз через пару секунд", detail: lastErr }, 409);
 }
