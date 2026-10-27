@@ -1,7 +1,7 @@
 // Shared tournament state, stored as one private JSON blob in Vercel Blob.
 // Every write is read-modify-write with an ETag check (ifMatch), retried on
 // conflict, so two friends saving at the same moment never overwrite each other.
-import { get, put, BlobPreconditionFailedError } from "@vercel/blob";
+import { get, head, put, BlobPreconditionFailedError } from "@vercel/blob";
 
 const PATH = "ucl-2026-27/state.json";
 const EMPTY = () => ({ rev: 0, results: {}, ko: {}, cards: {}, cfg: { names: ["", "", "", ""], owner: {}, picks: [], order: [0, 1, 2, 3] }, log: [] });
@@ -41,15 +41,23 @@ const CACHE_MS = 4000;
 let latest = null; // {state, etag}
 const revOf = s => (s && Number.isInteger(s.rev) ? s.rev : 0);
 
+const normTag = t => String(t || "").replace(/^W\//, "").replace(/"/g, "");
+
+// Content comes from get(useCache:false); the etag used for ifMatch comes from head(), as in the
+// Vercel docs — the etag reported by get() did not match on put() and every save was rejected.
+// If the content we got is not the version head() reports, the read is stale: `fresh` is false
+// and the caller waits instead of writing on top of old data.
 async function readState() {
-  // useCache:false — an overwritten blob can be served stale from Blob's cache for up to 60 s;
-  // a stale read here made fresh draft picks "disappear" for a few seconds.
-  const r = await get(PATH, { access: "private", useCache: false });
-  if (!r || r.statusCode !== 200 || !r.stream) return { state: EMPTY(), etag: null };
+  const [h, r] = await Promise.all([
+    head(PATH).catch(e => (e && /not.?found/i.test(e.name + " " + e.message) ? null : Promise.reject(e))),
+    get(PATH, { access: "private", useCache: false }),
+  ]);
+  if (!h || !r || r.statusCode !== 200 || !r.stream) return { state: EMPTY(), etag: null, fresh: !h, dbg: "empty" };
   const state = normalize(await new Response(r.stream).json());
-  const read = { state, etag: r.blob.etag };
-  if (latest && latest.etag && revOf(latest.state) > revOf(state)) return { state: structuredClone(latest.state), etag: latest.etag };
-  return read;
+  const fresh = normTag(h.etag) === normTag(r.blob.etag);
+  const dbg = `head=${h.etag} get=${r.blob.etag}`;
+  if (latest && normTag(latest.etag) === normTag(h.etag)) return { state: structuredClone(latest.state), etag: h.etag, fresh: true, dbg };
+  return { state, etag: h.etag, fresh, dbg };
 }
 
 function apply(state, body) {
@@ -174,6 +182,11 @@ export async function POST(request) {
     try {
       const cur = await readState();
       state = cur.state;
+      lastErr = cur.dbg;
+      if (!cur.fresh) {   // storage still serves an older copy — wait for it rather than overwrite newer data
+        if (attempt < waits.length) { await new Promise(r => setTimeout(r, waits[attempt])); continue; }
+        break;
+      }
       apply(state, body);
       state.rev = (Number.isInteger(state.rev) ? state.rev : 0) + 1;   // monotonically increasing version
       const res = await put(PATH, JSON.stringify(state), {
@@ -187,7 +200,7 @@ export async function POST(request) {
     } catch (e) {
       if (e instanceof UserError) return json({ error: e.message, state }, e.status);
       const conflict = e instanceof BlobPreconditionFailedError || /already exists|precondition/i.test(String(e && e.message));
-      lastErr = `${e && e.name}: ${e && e.message}`;
+      lastErr = `${e && e.name}: ${e && e.message} (${lastErr})`;
       if (conflict && attempt < waits.length) { latest = null; await new Promise(r => setTimeout(r, waits[attempt] + Math.random() * 150)); continue; }
       if (conflict) break;
       return json({ error: "Не удалось сохранить: " + e.message }, 500);
