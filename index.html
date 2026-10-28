@@ -320,6 +320,23 @@ button.dcard:disabled{cursor:default;opacity:.75}
   .ocard .row{flex-wrap:wrap;gap:4px 10px}
   .pcard{padding:12px}
 }
+
+/* projected bracket (before the league phase ends) */
+.pbracket{display:grid;gap:18px}
+.pround{display:grid;gap:8px}
+.pround h3{margin:0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.pgridb{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px}
+.ptie{padding:9px 12px;display:grid;gap:4px;min-width:0}
+.ptie .pt{font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.ptie .vs{font-size:11px;color:var(--muted);line-height:1;padding-left:28px}
+.pteam{display:flex;align-items:center;gap:7px;min-width:0;font-size:14px;border-radius:6px}
+.pteam .seed{font-size:11px;color:var(--muted);width:20px;flex:none;font-weight:600}
+.pteam .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pteam.on,.cb.on{background:var(--accent-soft)}
+.pcand{display:grid;gap:4px}
+.pcand .lbl{font-size:12px;color:var(--muted)}
+.pcand .bl{display:flex;flex-wrap:wrap;gap:3px}
+.cb{display:inline-flex;border-radius:50%;padding:1px}
 </style>
 </head>
 <body>
@@ -403,8 +420,6 @@ const FIXTURES = [...FX.matchAll(/(\d)\|(\d{4}-\d\d-\d\d)\|(\d\d:\d\d)\|([A-Z]+)
   .map(([, md, date, time, h, a]) => ({id:`md${md}-${h}-${a}`, md:+md, date, time, h, a}));
 
 // Knockout calendar (UEFA): first leg / second leg
-const KO_DATES = {PO:"16/17 и 23/24 февраля", R:"9/10 и 16/17 марта", QF:"6/7 и 13/14 апреля",
-  SF:"27/28 апреля и 4/5 мая", F:"5 июня 2027 · Мадрид, «Метрополитано»"};
 
 // ---- date & time helpers: UEFA times are Central European (summer time until 25 Oct 2026)
 const WD = ["вс","пн","вт","ср","чт","пт","сб"], MON = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
@@ -905,15 +920,9 @@ function viewPlayoff(){
   const dis = (S.canWrite && K.done) ? "" : "disabled";
   const head = K.done
     ? `<p class="sub">Пары построены по итоговой таблице. Первый матч — у клуба с худшим местом, ответный — у лучшего. При равенстве по сумме двух матчей отметьте, кто прошёл по пенальти.</p>`
-    : `<div class="note">Сетка откроется после всех 144 матчей общего этапа (сыграно ${playedCount()}). Ниже — как выглядели бы пары по текущей таблице.</div>`;
-  const preview = !K.done ? (()=> {
-    const seed = rows.map(r=>r.c);
-    return `<div class="panel" style="padding:12px 14px;display:grid;gap:8px"><b>Плей-офф раунд по текущей таблице</b>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px">${[0,1,2,3,4,5,6,7].map(i=>`
-        <div style="display:flex;align-items:center;gap:6px;font-size:13px;min-width:0">
-          <span class="seed num" style="font-size:11px;color:var(--muted);width:22px">${9+i}</span>${badge(seed[8+i],true)}<span class="nm" style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(CLUBS[seed[8+i]][0])}</span>
-          <span style="color:var(--muted)">–</span>${badge(seed[23-i],true)}<span class="nm" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(CLUBS[seed[23-i]][0])}</span><span class="seed num" style="font-size:11px;color:var(--muted)">${24-i}</span>
-        </div>`).join("")}</div></div>`; })() : "";
+    : `<div class="note">Счёт можно будет вносить после всех 144 матчей общего этапа (сыграно ${playedCount()}). Ниже — примерная сетка по текущей таблице: места 1–8 ждут в 1/8 финала, 9–24 играют плей-офф раунд.</div>`;
+  // Before the league phase is over: a projected bracket from the current table with all 24 qualifiers.
+  const preview = !K.done ? projectedBracket(rows) : "";
 
   const tieHtml = t => {
     const single = t.single;
@@ -944,10 +953,40 @@ function viewPlayoff(){
   };
   const cols = ROUND_NAMES.map(([pre, name, n])=>{
     const ids = n===1 ? ["F"] : Array.from({length:n},(_,i)=>`${pre}${i+1}`);
-    return `<section class="round"><h3>${name}</h3><p class="sub" style="font-size:12px">${KO_DATES[pre]}</p>${ids.map(id=>tieHtml(K.ties[id])).join("")}</section>`;
+    return `<section class="round"><h3>${name}</h3>${ids.map(id=>tieHtml(K.ties[id])).join("")}</section>`;
   }).join("");
   const champ = K.champ ? `<div class="panel champ">${badge(K.champ)}<div><div class="sub">Победитель Лиги чемпионов 2026/27</div><div class="t">${esc(CLUBS[K.champ][0])}</div>${ownerOf(K.champ)!==null?`<div class="sub">Клуб участника ${esc(pname(ownerOf(K.champ)))}</div>`:""}</div></div>` : "";
-  return `<div style="display:grid;gap:8px"><h2>Плей-офф</h2>${head}</div>${filterBar()}${champ}${preview}<div class="rounds">${cols}</div>`;
+  return `<div style="display:grid;gap:8px"><h2>Плей-офф</h2>${head}</div>${filterBar()}${champ}${K.done?`<div class="rounds">${cols}</div>`:preview}`;
+}
+
+function projectedBracket(rows){
+  const seed = rows.map(r=>r.c), pos = {}; rows.forEach(r=>pos[r.c]=r.pos);
+  const sel = selP();
+  const hl = c => sel.length ? sel.includes(ownerOf(c)) : (S.team===c);
+  const team = c => `<div class="pteam${hl(c)?" on":""}"><span class="seed num">${pos[c]}</span>${badge(c,true)}<span class="nm">${esc(CLUBS[c][0])}</span>${ownDot(c)}</div>`;
+  const cands = (label, list) => list.length <= 2
+    ? `<div class="pcand"><span class="lbl">${label}:</span>${list.map(team).join("")}</div>`
+    : `<div class="pcand"><span class="lbl">${label}</span><span class="bl">${list.map(c=>`<span class="cb${hl(c)?" on":""}" title="${pos[c]}. ${esc(CLUBS[c][0])}${ownerOf(c)!==null?" · "+esc(pname(ownerOf(c))):""}">${badge(c,true)}</span>`).join("")}</span></div>`;
+  const card = (title, a, b) => `<div class="panel ptie"><div class="pt">${title}</div>${a}<div class="vs">—</div>${b}</div>`;
+  // playoff round: 9 v 24 … 16 v 17
+  const PO = [0,1,2,3,4,5,6,7].map(i=>({id:i+1, t:[seed[8+i], seed[23-i]]}));
+  const R = [0,1,2,3,4,5,6,7].map(k=>({id:k+1, top:seed[k], po:PO[7-k]}));
+  const rTeams = r => [r.top, ...r.po.t];
+  const QF = [[0,7],[3,4],[1,6],[2,5]].map(([a,b],i)=>({id:i+1, a:R[a], b:R[b]}));
+  const qTeams = q => [...rTeams(q.a), ...rTeams(q.b)];
+  const SF = [[0,1],[2,3]].map(([a,b],i)=>({id:i+1, a:QF[a], b:QF[b]}));
+  const sTeams = x => [...qTeams(x.a), ...qTeams(x.b)];
+  const sec = (name, note, body) => `<section class="pround"><h3>${name}</h3>${note?`<p class="sub" style="font-size:12px;margin:0">${note}</p>`:""}<div class="pgridb">${body}</div></section>`;
+  const byPos = l => [...l].sort((x,y)=>pos[x]-pos[y]);
+  return `<div class="pbracket">
+    ${sec("Плей-офф раунд", "9–16 места против 17–24, ответный матч дома у того, кто выше",
+      PO.map(p=>card(`Пара ${p.id}`, team(p.t[0]), team(p.t[1]))).join(""))}
+    ${sec("1/8 финала", "Клубы 1–8 ждут победителей плей-офф раунда",
+      R.map(r=>card(`1/8 · ${r.id}`, team(r.top), cands(`Победитель пары ${r.po.id}`, r.po.t))).join(""))}
+    ${sec("1/4 финала", "", QF.map(q=>card(`1/4 · ${q.id}`, cands(`Победитель 1/8 · ${q.a.id}`, byPos(rTeams(q.a))), cands(`Победитель 1/8 · ${q.b.id}`, byPos(rTeams(q.b))))).join(""))}
+    ${sec("1/2 финала", "", SF.map(x=>card(`1/2 · ${x.id}`, cands(`Победитель 1/4 · ${x.a.id}`, byPos(qTeams(x.a))), cands(`Победитель 1/4 · ${x.b.id}`, byPos(qTeams(x.b))))).join(""))}
+    ${sec("Финал", "", card("Финал", cands("Победитель 1/2 · 1", byPos(sTeams(SF[0]))), cands("Победитель 1/2 · 2", byPos(sTeams(SF[1])))))}
+  </div>`;
 }
 
 // ---------------------------------------------------------------- participants' stats
